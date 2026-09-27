@@ -264,6 +264,8 @@ const unknownView = (): ProviderHealthView => ({
   last_refresh_succeeded: null,
 });
 
+export const unknownProviderHealthView = (): ProviderHealthView => unknownView();
+
 const latestObservation = (observations: readonly ProviderHealthObservation[], events?: readonly ProviderHealthEvent[]): ProviderHealthObservation | null => {
   const allowed = events ? new Set(events) : null;
   return observations

@@ -240,15 +240,20 @@ const captureProviderCapacitySnapshot = async (
   const codexPromise = Promise.all(
     ([1, 2] as const).map(async (slot) => {
       const account = accounts.find((candidate) => candidate.slot === slot);
-      return account
-        ? await fetchCodexCapacitySource(
-            account,
-            await sha256Hex(`uos-prompt-cache-account-cohort-v1\u0000${account.account_id}`),
-            snapshotAtMs,
-            fetcher,
-            signal
-          )
-        : unavailableCodexSource(slot, snapshotAtMs);
+      try {
+        return account
+          ? await fetchCodexCapacitySource(
+              account,
+              await sha256Hex(`uos-prompt-cache-account-cohort-v1\u0000${account.account_id}`),
+              snapshotAtMs,
+              fetcher,
+              signal
+            )
+          : unavailableCodexSource(slot, snapshotAtMs);
+      } catch {
+        // A configured slot that throws here is unreachable, not unconfigured; only a missing account keeps the default kind.
+        return account ? unavailableCodexSource(slot, snapshotAtMs, "unreachable", null, true) : unavailableCodexSource(slot, snapshotAtMs);
+      }
     })
   );
   const meteredPromise = getConfiguredMeteredQuotaSnapshot({

@@ -77,7 +77,7 @@ const loadEmbeddingsVectorsFromCache = async (
 ): Promise<(number[] | null)[]> => {
   const uniqueHashes = Array.from(new Set(hashesByIndex));
   const cacheKeyFor = (hash: string): Deno.KvKey => embeddingsCacheKey(cacheProfileKey, hash);
-  const entries = await Promise.all(uniqueHashes.map((hash) => kv.get<{ embedding?: unknown }>(cacheKeyFor(hash))));
+  const entries = await Promise.all(uniqueHashes.map((hash) => kv.get<{ embedding?: unknown }>(cacheKeyFor(hash)).catch(() => null)));
   const vectorsByHash = new Map<string, number[]>();
   for (const [i, hash] of uniqueHashes.entries()) {
     const cached = entries[i]?.value?.embedding;
@@ -123,7 +123,7 @@ const updateEmbeddingsJobRecord = async (kv: Deno.Kv, jobKey: Deno.KvKey, lookup
 };
 
 const deleteEmbeddingsJobInputs = async (kv: Deno.Kv, tokenHash: string, cacheProfileKey: string, jobId: string, uniqueHashes: string[]): Promise<void> => {
-  await Promise.all(uniqueHashes.map((hash) => kv.delete(embeddingsJobInputKey(tokenHash, cacheProfileKey, jobId, hash))));
+  await Promise.allSettled(uniqueHashes.map((hash) => kv.delete(embeddingsJobInputKey(tokenHash, cacheProfileKey, jobId, hash))));
 };
 
 export const runEmbeddingsJobAttempt = async (params: {
@@ -179,7 +179,7 @@ export const runEmbeddingsJobAttempt = async (params: {
   let queueFailureKind: string | null = null;
 
   const computeMissing = async (): Promise<string[]> => {
-    const entries = await Promise.all(uniqueHashes.map((hash) => params.kv.get<{ embedding?: unknown }>(cacheKeyFor(hash))));
+    const entries = await Promise.all(uniqueHashes.map((hash) => params.kv.get<{ embedding?: unknown }>(cacheKeyFor(hash)).catch(() => null)));
     const missing: string[] = [];
     for (let i = 0; i < uniqueHashes.length; i += 1) {
       const hash = uniqueHashes[i];
@@ -270,13 +270,15 @@ export const runEmbeddingsJobAttempt = async (params: {
     hashes: string[]
   ): Promise<{ kind: "ok"; items: { hash: string; text: string }[] } | { kind: "response"; response: Response }> => {
     const inputEntries = await Promise.all(
-      hashes.map((hash) => params.kv.get<EmbeddingsJobInputRecord>(embeddingsJobInputKey(params.tokenHash, locked.cache_profile_key, locked.id, hash)))
+      hashes.map((hash) =>
+        params.kv.get<EmbeddingsJobInputRecord>(embeddingsJobInputKey(params.tokenHash, locked.cache_profile_key, locked.id, hash)).catch(() => null)
+      )
     );
     const items: { hash: string; text: string }[] = [];
     for (let i = 0; i < hashes.length; i += 1) {
       const hash = hashes[i];
       const entry = inputEntries[i];
-      const normalized = normalizeEmbeddingsJobInputRecord(entry.value);
+      const normalized = normalizeEmbeddingsJobInputRecord(entry?.value);
       if (!normalized) {
         return { kind: "response", response: await failJob("Embeddings job input expired or was unavailable.", "embeddings_job_input_missing") };
       }

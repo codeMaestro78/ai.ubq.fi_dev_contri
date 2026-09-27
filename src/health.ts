@@ -14,6 +14,7 @@ import {
   getSurplusProviderHealth,
   PROVIDER_HEALTH_STALE_AFTER_MS,
   type ProviderHealthState,
+  unknownProviderHealthView,
 } from "./provider/health.ts";
 import { decodeBase64ToString } from "./utils.ts";
 import type { CodexAuthPoolState } from "./types.ts";
@@ -227,13 +228,13 @@ export const getPassiveProviderHealthSnapshot = async (options: Readonly<{ inclu
   const context = await getCodexAuthContext();
   const auth = enrichAuthMeta(context.meta);
   const [cerebrasHealth, codexHealth, deepseekHealth, lithosHealth, meteredHealth, surplusHealth, meteredQuota] = await Promise.all([
-    getCerebrasProviderHealth(),
-    Promise.all(context.account_ids.map((accountId) => getCodexProviderHealth(accountId))),
-    getDeepSeekProviderHealth(),
-    getLithosProviderHealth(),
-    getMeteredProviderHealth(),
-    getSurplusProviderHealth(),
-    getCachedConfiguredMeteredQuotaSnapshot(),
+    getCerebrasProviderHealth().catch(() => unknownProviderHealthView()),
+    Promise.all(context.account_ids.map((accountId) => getCodexProviderHealth(accountId).catch(() => unknownProviderHealthView()))),
+    getDeepSeekProviderHealth().catch(() => unknownProviderHealthView()),
+    getLithosProviderHealth().catch(() => unknownProviderHealthView()),
+    getMeteredProviderHealth().catch(() => unknownProviderHealthView()),
+    getSurplusProviderHealth().catch(() => unknownProviderHealthView()),
+    getCachedConfiguredMeteredQuotaSnapshot().catch(() => null),
   ]);
   const codexAccounts = auth.accounts.map((account, index) => ({
     ...account,

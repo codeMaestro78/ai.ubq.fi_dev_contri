@@ -126,8 +126,8 @@ const logTerminalRequest = async (
   // Optional aggregate analytics is enqueued on the bounded best-effort queue
   // by default, so a slow analytics sink cannot extend the terminal handoff.
   // The explicit test seam still injects the direct writer. Every other write
-  // in this batch stays awaited: the durable gate counters, admin error
-  // evidence, Sentinel replay/degradation and quota accounting are reliable.
+  // in this batch stays awaited but best-effort: a rejected sink is warned
+  // below and never fails the terminal handoff or erases sibling evidence.
   const cacheAnalyticsEvent = {
     provider: terminal.provider,
     model: terminal.model,
@@ -182,7 +182,12 @@ const logTerminalRequest = async (
       git_sha: terminal.git_sha,
       deno_revision: terminal.deno_revision,
     });
-    await Promise.all([telemetryWrite, cacheAnalyticsWrite, replayWrite, degradationWrite, adminErrorWrite]);
+    const settled = await Promise.allSettled([telemetryWrite, cacheAnalyticsWrite, replayWrite, degradationWrite, adminErrorWrite]);
+    const rejected = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (rejected.length > 0) {
+      const classes = rejected.map((item) => (item.reason instanceof Error ? item.reason.name : typeof item.reason));
+      console.warn("[ai.ubq.fi] terminal_writes_failed", JSON.stringify({ request_id: terminal.request_id, classes }));
+    }
   } finally {
     zeroSentinelReplayInput(input.sentinelReplayInput);
   }

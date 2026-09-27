@@ -172,11 +172,11 @@ const handleEmbeddingsRequest = async (req: Request, usageContext?: UsageContext
       return;
     }
     const unique = Array.from(buckets.entries()).map(([hash, bucket]) => ({ hash, ...bucket }));
-    const entries = await Promise.all(unique.map((item) => kv.get<{ embedding?: unknown }>(cacheKeyFor(item.hash))));
+    const entries = await Promise.all(unique.map((item) => kv.get<{ embedding?: unknown }>(cacheKeyFor(item.hash)).catch(() => null)));
     for (let i = 0; i < unique.length; i += 1) {
       const item = unique[i];
       const entry = entries[i];
-      const cached = entry.value?.embedding;
+      const cached = entry?.value?.embedding;
       if (isValidEmbeddingVector(cached, profile.dimensions)) {
         for (const idx of item.indices) vectorsByIndex[idx] = cached;
       } else {

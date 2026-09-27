@@ -137,28 +137,32 @@ const loadEnvCodexAuth = (): CodexAuthContext | null => {
 };
 
 const getCodexAuthContext = async (): Promise<CodexAuthContext> => {
-  const kv = await getKv();
-  if (kv) {
-    const entry = await kv.get<CodexAuthPoolState>(CODEX_AUTH_POOL_KV_KEY);
-    const pool = parseCodexAuthPool(entry.value);
-    if (pool) {
-      const accounts = pool.accounts.map((account, index) => ({
-        slot: index + 1,
-        updated_at_ms: account.updated_at_ms,
-        access_token_exp_ms: getJwtExpMs(account.access_token),
-      }));
-      const expirations = accounts.map((account) => account.access_token_exp_ms).filter((value): value is number => typeof value === "number");
-      return {
-        meta: {
-          source: "kv",
-          updated_at_ms: pool.updated_at_ms,
-          access_token_exp_ms: expirations.length > 0 ? Math.min(...expirations) : null,
-          account_count: accounts.length,
-          accounts,
-        },
-        account_ids: pool.accounts.map((account) => account.account_id),
-      };
+  try {
+    const kv = await getKv();
+    if (kv) {
+      const entry = await kv.get<CodexAuthPoolState>(CODEX_AUTH_POOL_KV_KEY);
+      const pool = parseCodexAuthPool(entry.value);
+      if (pool) {
+        const accounts = pool.accounts.map((account, index) => ({
+          slot: index + 1,
+          updated_at_ms: account.updated_at_ms,
+          access_token_exp_ms: getJwtExpMs(account.access_token),
+        }));
+        const expirations = accounts.map((account) => account.access_token_exp_ms).filter((value): value is number => typeof value === "number");
+        return {
+          meta: {
+            source: "kv",
+            updated_at_ms: pool.updated_at_ms,
+            access_token_exp_ms: expirations.length > 0 ? Math.min(...expirations) : null,
+            account_count: accounts.length,
+            accounts,
+          },
+          account_ids: pool.accounts.map((account) => account.account_id),
+        };
+      }
     }
+  } catch {
+    // A failed auth-pool read degrades to env/none metadata instead of failing the health snapshot.
   }
 
   const envMeta = loadEnvCodexAuth();

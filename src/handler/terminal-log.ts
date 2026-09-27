@@ -25,6 +25,18 @@ import {
 } from "../sentinel/replay-capture.ts";
 import type { recordSentinelProviderDegradationFromEnvironment } from "../sentinel/incident-outbox.ts";
 
+// A sink invoked while building the terminal batch can throw synchronously
+// (injected test seams included), which would bypass allSettled below and
+// abort sibling writes. Capturing the call converts that throw into a
+// rejection so every sibling still settles.
+const settleTerminalWrite = (write: () => unknown): Promise<unknown> => {
+  try {
+    return Promise.resolve(write());
+  } catch (error) {
+    return Promise.reject(error);
+  }
+};
+
 const logTerminalRequest = async (
   input: Readonly<{
     route: string;
@@ -114,7 +126,7 @@ const logTerminalRequest = async (
     router_revision: input.response.headers.get("x-uos-router-revision"),
   };
   console.info("[ai.ubq.fi] request_terminal", JSON.stringify(terminal));
-  const telemetryWrite = (input.recordTelemetry ?? recordPromptCacheTelemetry)({
+  const telemetryWrite = settleTerminalWrite(() => (input.recordTelemetry ?? recordPromptCacheTelemetry)({
     provider: terminal.provider,
     model: terminal.model,
     route: terminal.route,
@@ -122,7 +134,7 @@ const logTerminalRequest = async (
     completed: input.streamReadFailure ? false : (telemetry?.completed ?? false),
     usageTelemetryStatus: terminal.usage_telemetry_status,
     cacheWriteTokensPresent: terminal.cache_write_input_tokens !== null,
-  });
+  }));
   // Optional aggregate analytics is enqueued on the bounded best-effort queue
   // by default, so a slow analytics sink cannot extend the terminal handoff.
   // The explicit test seam still injects the direct writer. Every other write
@@ -142,7 +154,9 @@ const logTerminalRequest = async (
     promptCacheMode: terminal.prompt_cache_mode,
     fallbackReason: terminal.fallback_reason,
   };
-  const cacheAnalyticsWrite = input.recordCacheAnalytics ? input.recordCacheAnalytics(cacheAnalyticsEvent) : enqueuePromptCacheAnalytics(cacheAnalyticsEvent);
+  const cacheAnalyticsWrite = settleTerminalWrite(() =>
+    input.recordCacheAnalytics ? input.recordCacheAnalytics(cacheAnalyticsEvent) : enqueuePromptCacheAnalytics(cacheAnalyticsEvent)
+  );
   const replayObservation: SentinelFailureObservation = {
     status: terminal.status,
     stream: terminal.stream,
@@ -157,16 +171,18 @@ const logTerminalRequest = async (
     const clientObservation = resolveSentinelClientFailureObservation(replayObservation, clientBodyObservation);
     const replayWrite =
       input.sentinelReplayInput && !input.suppressSentinelReplay && shouldPersistSentinelReplay(replayObservation, clientObservation)
-        ? (input.persistSentinelReplay ?? persistSentinelReplayFromEnvironment)(input.sentinelReplayInput, replayObservation, clientObservation)
+        ? settleTerminalWrite(() =>
+            (input.persistSentinelReplay ?? persistSentinelReplayFromEnvironment)(input.sentinelReplayInput, replayObservation, clientObservation)
+          )
         : Promise.resolve();
     const degradationWrite = shouldSignalSentinelProviderDegradation({
       status: terminal.status,
       completed: telemetry?.completed ?? false,
       removedProviderTriggerClass: terminal.removed_provider_trigger_class,
     })
-      ? input.recordSentinelDegradation?.(Date.now())
+      ? settleTerminalWrite(() => input.recordSentinelDegradation?.(Date.now()))
       : Promise.resolve();
-    const adminErrorWrite = (input.recordAdminError ?? recordAdminError)({
+    const adminErrorWrite = settleTerminalWrite(() => (input.recordAdminError ?? recordAdminError)({
       request_id: terminal.request_id,
       route: terminal.route,
       status: terminal.status,
@@ -181,7 +197,7 @@ const logTerminalRequest = async (
       latency_ms: terminal.latency_ms,
       git_sha: terminal.git_sha,
       deno_revision: terminal.deno_revision,
-    });
+    }));
     const settled = await Promise.allSettled([telemetryWrite, cacheAnalyticsWrite, replayWrite, degradationWrite, adminErrorWrite]);
     const rejected = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     if (rejected.length > 0) {

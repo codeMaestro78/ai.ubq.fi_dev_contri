@@ -169,10 +169,13 @@ const logTerminalRequest = async (
   try {
     const clientBodyObservation = (await input.resolveClientBodyObservation?.()) ?? null;
     const clientObservation = resolveSentinelClientFailureObservation(replayObservation, clientBodyObservation);
+    // Hoisted so the narrowing survives inside the settle closure below;
+    // narrowing input.sentinelReplayInput directly would be lost in the arrow.
+    const replayInput = input.sentinelReplayInput;
     const replayWrite =
-      input.sentinelReplayInput && !input.suppressSentinelReplay && shouldPersistSentinelReplay(replayObservation, clientObservation)
+      replayInput && !input.suppressSentinelReplay && shouldPersistSentinelReplay(replayObservation, clientObservation)
         ? settleTerminalWrite(() =>
-            (input.persistSentinelReplay ?? persistSentinelReplayFromEnvironment)(input.sentinelReplayInput, replayObservation, clientObservation)
+            (input.persistSentinelReplay ?? persistSentinelReplayFromEnvironment)(replayInput, replayObservation, clientObservation)
           )
         : Promise.resolve();
     const degradationWrite = shouldSignalSentinelProviderDegradation({
